@@ -1,101 +1,80 @@
-# Modern Islamic Luxury Qibla Compass UI
+# GitHub Pages White Screen Resolution & Automated Deployment
 
-> A visually intuitive, high-precision Qibla compass interface featuring modern Islamic luxury aesthetics, gold and deep emerald palettes, smooth CSS transform rotations, real-time Geolocation calculations, and golden aura alignment feedback.
-
----
+Fix the complete white screen issue on the deployed GitHub Pages site (`https://ahsan3944.github.io/prayer-clock-salah-companion/`) by providing the production GitHub Actions build-and-deploy workflow, SPA 404 fallback routing, and verifying Vite build artifact consistency.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following design decisions were confirmed via interactive consultation:
-> - **Visual Direction**: Modern Islamic luxury with deep emerald hues, brushed gold accents, and fine geometric guilloché dial markings.
-> - **Rotation Mechanics**: Dual CSS transform mechanics:
->   - The outer compass dial with degree markings and cardinal points rotates in real-time matching the device's magnetic heading (`transform: rotate(${-deviceHeading}deg)`).
->   - The Kaaba pointer needle rotates directly toward the forward azimuth bearing of the Kaaba (`transform: rotate(${needleAngle}deg)`).
-> - **Alignment Feedback**: When pointed directly at Makkah ($\pm 4^\circ$), activates a golden aura ambient pulse, a focused emerald-gold alignment beam shooting upward from the Kaaba pointer, and a synchronized haptic pulse.
+> The verified root cause is that GitHub Pages was serving raw repository root files (including unbundled `<script type="module" src="/src/main.tsx"></script>`) rather than the compiled `dist/` production assets. Modern browsers cannot directly execute raw TypeScript `.tsx` files, resulting in an unmounted DOM and a completely white screen.
+
+- **Confirmed Decision 1**: Automated GitHub Actions workflow configured under `.github/workflows/deploy.yml` that checks out the repo, sets up Node.js, runs `npm ci` and `npm run build`, and deploys the generated `dist/` directory to GitHub Pages.
+- **Confirmed Decision 2**: Include a lightweight `404.html` SPA redirect helper in `public/` to prevent HTTP 404 on deep links or manual browser refreshes on GitHub Pages.
 
 ---
 
 ## 1. Overview & Core Concept
 
-The enhanced **Qibla Compass UI** provides a tactile, calm, and unmistakably Islamic navigation experience:
-1. **Islamic Luxury Bezel & Dial**: A multi-layered bezel with gold metallic rings, 360-degree ticks, cardinal indices, and subtle geometric patterns.
-2. **CSS Transform Rotation Engine**: Hardware-accelerated compositor-only transforms (`transform: rotate(...)`) with smooth magnetic damping to eliminate jitter while maintaining zero latency.
-3. **Kaaba Crowned Needle**: A dual-tapered golden needle crowned with an authentic gold Kaaba motif pointing directly to Makkah.
-4. **Golden Aura & Alignment Beam**: Clear, immediate visual feedback that illuminates the dial and gives haptic confirmation when aligned with the Qibla.
-5. **Universal Sensor & Desktop Support**: Seamless operation on mobile devices with orientation sensors (iOS/Android) and desktop browsers with an intuitive heading dial slider.
+- **What It Does**: Establishes a seamless, production-grade GitHub Pages deployment pipeline. When changes are pushed to `main`, GitHub Actions automatically compiles the Vite bundle, maps all asset paths to the `/prayer-clock-salah-companion/` subpath, and publishes the compiled static assets (`dist/`) directly to the official GitHub Pages CDN.
+- **Target Audience**: Users accessing the live companion web app via GitHub Pages across desktop and mobile devices.
+- **Key Value**: Guarantees zero white-screen crashes, instantaneous bundle loading, correct CSS/font/icon rendering, and offline PWA capability under GitHub's subpath URL structure.
 
 ---
 
 ## 2. User Experience & Visual Design
 
-### 2.1 Aesthetic Theme & Visual Palette
-- **Canvas & Housing**: Deep emerald slate (`#022c22` / `#064e3b` / `#0f172a`) with subtle radial illumination.
-- **Accents**: Radiant brushed gold (`#fbbf24`, `#d97706`, `#fef08a`) and emerald glow (`#10b981`, `#34d399`).
-- **Typography**: Tabular figures for degree counters, `Plus Jakarta Sans` for labels, and `Amiri` Arabic calligraphy for Makkah al-Mukarramah.
-
-### 2.2 Visual Layout & Component Anatomy
-
-```
-               ┌────────────────────────────────────────────────────────┐
-               │                     TOP HEADER                         │
-               │   [Compass Icon]  Qibla Compass            [Close X]   │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-               ┌───────────────────────────▼────────────────────────────┐
-               │    LOCATION STATUS BAR: GPS Coordinates & Accuracy     │
-               │    21.42° N, 39.82° E · Precise GPS (±5m accuracy)     │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-               ┌───────────────────────────▼────────────────────────────┐
-               │                                                        │
-               │           [ ALIGNMENT BEAM EMITTING UPWARD ]           │
-               │                                                        │
-               │                  ┌──────────────────┐                  │
-               │               ┌──┘        N         └──┐               │
-               │             ┌─┘       ▲ [Kaaba]        └─┐             │
-               │            │ W            │             E │            │
-               │            │              ●               │            │
-               │             └─┐           │            ┌─┘             │
-               │               └──┐        S         ┌──┘               │
-               │                  └──────────────────┘                  │
-               │                                                        │
-               │               [ GOLDEN AURA AMBIENT GLOW ]             │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-               ┌───────────────────────────▼────────────────────────────┐
-               │   Qibla: 268.4° W  ·  Device: 268°  ·  4,285 km        │
-               │   Facing the Kaaba (Al-Bayt al-Haram)                  │
-               └────────────────────────────────────────────────────────┘
-```
+- **Zero UI Disruption**: The application's existing visual design (modern Islamic luxury aesthetic, gold/emerald accents, typography, digital clock, prayer timetables, Bukhari Hadith reader, and Tasbih counter) remains completely intact.
+- **Loading & First Paint**: Eliminates failed network requests (`404` on `/assets/...` or `/src/main.tsx`), enabling immediate rendering of the initial layout, prayer schedule, and digital clock.
+- **SPA Refresh Handling**: With `404.html` fallback in `public/`, any page refresh or direct navigation gracefully retains state and redirects to the base repository path without showing GitHub's default 404 error page.
 
 ---
 
-## 3. Technical Architecture & CSS Transform Strategy
+## 3. Key Product Decisions & Trade-Offs
 
-### 3.1 Transform Formulas
-- **Outer Dial Rotation**:
-  $$\text{dialStyle} = \{\; \text{transform: } \text{`rotate(}\${-\text{deviceHeading}}\text{deg)`},\; \text{transition: 'transform 0.18s cubic-bezier(0.16, 1, 0.3, 1)'} \;\}$$
-- **Qibla Needle Rotation**:
-  $$\text{needleAngle} = (\text{qiblaBearing} - \text{deviceHeading} + 360) \pmod{360}$$
-  $$\text{needleStyle} = \{\; \text{transform: } \text{`rotate(}\${\text{needleAngle}}\text{deg)`},\; \text{transition: 'transform 0.14s cubic-bezier(0.16, 1, 0.3, 1)'} \;\}$$
-- **Alignment Condition**:
-  $$\text{isAligned} = \text{needleAngle} \le 4^\circ \;\lor\; \text{needleAngle} \ge 356^\circ$$
+- **Decision 1: Official GitHub Actions `actions/deploy-pages` vs. Branch-Based `gh-pages`**
+  - *Chosen Approach*: Official GitHub Actions workflow (`deploy.yml`) utilizing `actions/upload-pages-artifact` and `actions/deploy-pages`.
+  - *Why*: Eliminates the need for a separate `gh-pages` branch, reduces repository clutter, guarantees reproducible builds in a clean CI environment, and prevents accidental commits of build artifacts to git history.
+  - *Alternatives Considered*: Manual `gh-pages` branch pushes (prone to branch sync mismatches and human error).
 
-### 3.2 Compositor Properties
-- Only `transform`, `opacity`, and `filter` are animated to ensure continuous 60fps performance without triggering browser layout thrashing.
+- **Decision 2: 404 Fallback Strategy for GitHub Pages**
+  - *Chosen Approach*: Place `public/404.html` with a lightweight SPA redirect script that encodes the requested path and replaces it on the primary `index.html`.
+  - *Why*: GitHub Pages natively serves `404.html` for any path not found on disk, enabling seamless single-page application hydration.
+  - *Alternatives Considered*: Hash-based routing (changes existing URL schema).
 
 ---
 
-## 4. Implementation Steps
+## 4. Technical Architecture & Data Strategy
 
-1. **Step 1: CSS & SVG Luxury Compass Dial**:
-   - Refactor dial markup inside `src/components/qibla/QiblaCompassModal.tsx` with high-resolution SVG tick marks, gold ring graduations, and Islamic geometry.
-2. **Step 2: Golden Aura & Alignment Beam Effects**:
-   - Add ambient radial gold-emerald aura pulse and focused conical alignment beam when `isAligned === true`.
-3. **Step 3: Kaaba Crowned Needle**:
-   - Redesign needle with brushed gold gradients, Kaaba gold cube emblem, and glowing hub jewel.
-4. **Step 4: Real-Time Coordinate & Damping Controls**:
-   - Add smooth sensor smoothing and desktop heading slider.
-5. **Step 5: Compilation & Verification**:
-   - Test with `compile_applet` and `lint_applet`.
+```
+┌────────────────────────────────────────────────────────┐
+│            GitHub Repository (Ahsan3944)               │
+│                  Branch: main                          │
+└──────────────────────────┬─────────────────────────────┘
+                           │ git push
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│        GitHub Actions (.github/workflows/deploy.yml)   │
+│  1. actions/checkout@v4                                │
+│  2. actions/setup-node@v4 (Node 20)                    │
+│  3. npm ci                                             │
+│  4. npm run build (Vite base: /.../)                   │
+│  5. actions/upload-pages-artifact@v3 (path: dist/)     │
+│  6. actions/deploy-pages@v4                            │
+└──────────────────────────┬─────────────────────────────┘
+                           │ deploys
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│            GitHub Pages CDN (ahsan3944.github.io)      │
+│  /prayer-clock-salah-companion/                        │
+│    ├── index.html (references /prayer-clock-.../assets)│
+│    ├── assets/ (compiled JS and CSS chunks)            │
+│    ├── icon.svg                                        │
+│    ├── manifest.json                                   │
+│    └── 404.html (SPA redirect fallback)                │
+└────────────────────────────────────────────────────────┘
+```
+
+### Action Items Upon Approval:
+1. Create `.github/workflows/deploy.yml` with proper permissions (`contents: read`, `pages: write`, `id-token: write`), Node 20 setup, dependency install, Vite build, and Pages deployment.
+2. Create `public/404.html` to support SPA routing fallback on GitHub Pages.
+3. Validate build output (`npm run build`) and verify compilation (`compile_applet`).
+4. Provide simple step-by-step instructions for the user to commit the changes and enable GitHub Actions in the GitHub repository's Pages settings.
