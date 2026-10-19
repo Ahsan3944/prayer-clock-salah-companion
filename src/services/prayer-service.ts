@@ -1,13 +1,109 @@
 import { CurrentPrayerStatus, DailyPrayerTimes, LocationProfile, PrayerCalculationSettings, PrayerName, PrayerTimesRecord, SupportedLanguage } from '../types';
 import { calculateLocalPrayerTimes } from './astronomical-engine';
 import { gregorianToHijri } from './hijri-calendar';
-import { getMonthlySchedules, getPrayerSchedule, getSyncMetadata, savePrayerSchedulesBatch, saveSyncMetadata } from './storage';
+import { getMonthlySchedules, getPrayerSchedule, getSyncMetadata, savePrayerSchedule, savePrayerSchedulesBatch, saveSyncMetadata } from './storage';
+
+export function getNowInTimezone(timezone?: string): Date {
+  const now = new Date();
+  if (!timezone) return now;
+  try {
+    const invDateStr = now.toLocaleString('en-US', { timeZone: timezone });
+    return new Date(invDateStr);
+  } catch (e) {
+    return now;
+  }
+}
+
+export function getTimezoneOffsetHours(timezone?: string): number {
+  if (timezone) {
+    try {
+      const now = new Date();
+      const invDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+      const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+      return (invDate.getTime() - utcDate.getTime()) / (1000 * 60 * 60);
+    } catch (e) {
+      // fallback
+    }
+  }
+  return -new Date().getTimezoneOffset() / 60;
+}
 
 function parseTimeToTodayDate(timeStr: string, baseDate: Date): Date {
   const [h, m] = timeStr.split(':').map((v) => parseInt(v, 10));
   const d = new Date(baseDate);
   d.setHours(h, m, 0, 0);
   return d;
+}
+
+export async function fetchTodayPrayerTimesFromApi(
+  location: LocationProfile,
+  settings: PrayerCalculationSettings,
+  lang: SupportedLanguage = 'en'
+): Promise<DailyPrayerTimes | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const asrParam = settings.asrSchool === 'hanafi' ? 1 : 0;
+    const url = `https://api.aladhan.com/v1/timings?latitude=${location.latitude}&longitude=${location.longitude}&method=${settings.methodId}&school=${asrParam}`;
+
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.code !== 200 || !data.data?.timings) return null;
+
+    const rawTimings = data.data.timings;
+    const cleanTime = (t: string) => t.split(' ')[0].trim();
+    const timings: PrayerTimesRecord = {
+      Fajr: cleanTime(rawTimings.Fajr),
+      Sunrise: cleanTime(rawTimings.Sunrise),
+      Dhuhr: cleanTime(rawTimings.Dhuhr),
+      Asr: cleanTime(rawTimings.Asr),
+      Sunset: cleanTime(rawTimings.Sunset || rawTimings.Maghrib),
+      Maghrib: cleanTime(rawTimings.Maghrib),
+      Isha: cleanTime(rawTimings.Isha),
+      Imsak: cleanTime(rawTimings.Imsak || rawTimings.Fajr),
+      Midnight: cleanTime(rawTimings.Midnight),
+    };
+
+    const nowInLoc = getNowInTimezone(location.timezone);
+    const year = nowInLoc.getFullYear();
+    const month = nowInLoc.getMonth() + 1;
+    const day = nowInLoc.getDate();
+    const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    const hijri = gregorianToHijri(nowInLoc, settings.hijriOffsetDays, lang);
+
+    const schedule: DailyPrayerTimes = {
+      compositeId: `${location.id}_${dateStr}`,
+      dateString: dateStr,
+      gregorianDate: {
+        day,
+        month,
+        year,
+        monthName: nowInLoc.toLocaleString('default', { month: 'long' }),
+        dayName: nowInLoc.toLocaleString('default', { weekday: 'long' }),
+      },
+      hijriDate: hijri,
+      timings,
+      windowEnds: {
+        Fajr: timings.Sunrise,
+        Dhuhr: timings.Asr,
+        Asr: timings.Sunset,
+        Maghrib: timings.Isha,
+        Isha: timings.Midnight,
+      },
+      locationId: location.id,
+      calculationSource: 'aladhan_api',
+      fetchedAt: Date.now(),
+    };
+
+    await savePrayerSchedule(schedule);
+    return schedule;
+  } catch (err) {
+    console.info('AlAdhan single-day timings API fetch error', err);
+    return null;
+  }
 }
 
 export async function fetchOrComputeMonthSchedule(
@@ -18,10 +114,10 @@ export async function fetchOrComputeMonthSchedule(
   lang: SupportedLanguage = 'en'
 ): Promise<DailyPrayerTimes[]> {
   const syncKey = `${location.id}_${year}_${month}_${settings.methodId}_${settings.asrSchool}`;
-  const existingSchedules = await getMonthlySchedules(year, month);
+  const existingSchedules = await getMonthlySchedules(location.id, year, month);
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  // If we already have all days cached for this month, return them directly
+  // If we already have all days cached for this specific location and month, return them directly
   if (existingSchedules.length >= daysInMonth) {
     return existingSchedules;
   }
@@ -38,7 +134,7 @@ export async function fetchOrComputeMonthSchedule(
     try {
       // Attempt AlAdhan API
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const asrParam = settings.asrSchool === 'hanafi' ? 1 : 0; // AlAdhan: 0 = Standard, 1 = Hanafi
       const url = `https://api.aladhan.com/v1/calendar/${year}/${month}?latitude=${location.latitude}&longitude=${location.longitude}&method=${settings.methodId}&school=${asrParam}`;
@@ -71,6 +167,7 @@ export async function fetchOrComputeMonthSchedule(
             const hijri = gregorianToHijri(gDate, settings.hijriOffsetDays, lang);
 
             return {
+              compositeId: `${location.id}_${dateStr}`,
               dateString: dateStr,
               gregorianDate: {
                 day: dayNum,
@@ -98,13 +195,13 @@ export async function fetchOrComputeMonthSchedule(
         }
       }
     } catch (apiError) {
-      console.info('AlAdhan API unavailable or timed out; activating local astronomical engine', apiError);
+      console.info('AlAdhan calendar API unavailable or timed out; activating local astronomical engine', apiError);
     }
   }
 
   // If API fetch failed or offline, compute via local astronomical engine
   if (!fetchedFromApi || schedules.length === 0) {
-    const timezoneOffset = -new Date().getTimezoneOffset() / 60;
+    const timezoneOffset = getTimezoneOffsetHours(location.timezone);
     schedules = [];
 
     for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
@@ -123,6 +220,7 @@ export async function fetchOrComputeMonthSchedule(
       const hijri = gregorianToHijri(gDate, settings.hijriOffsetDays, lang);
 
       schedules.push({
+        compositeId: `${location.id}_${dateStr}`,
         dateString: dateStr,
         gregorianDate: {
           day: dayNum,
@@ -166,45 +264,60 @@ export async function fetchOrComputeMonthSchedule(
 export async function getTodayPrayerTimes(
   location: LocationProfile,
   settings: PrayerCalculationSettings,
-  lang: SupportedLanguage = 'en'
+  lang: SupportedLanguage = 'en',
+  forceFresh = false
 ): Promise<DailyPrayerTimes> {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
+  const nowInLoc = getNowInTimezone(location.timezone);
+  const year = nowInLoc.getFullYear();
+  const month = nowInLoc.getMonth() + 1;
+  const day = nowInLoc.getDate();
   const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
 
-  const cached = await getPrayerSchedule(dateStr);
-  if (cached) {
-    return cached;
+  if (!forceFresh) {
+    const cached = await getPrayerSchedule(location.id, dateStr);
+    if (cached && cached.locationId === location.id && cached.timings?.Maghrib) {
+      return cached;
+    }
   }
 
-  const monthSchedules = await fetchOrComputeMonthSchedule(year, month, location, settings, lang);
-  const todaySchedule = monthSchedules.find((s) => s.dateString === dateStr);
+  // 1. Try fetching directly from AlAdhan API (lightweight, ~100ms)
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  if (isOnline) {
+    const apiSchedule = await fetchTodayPrayerTimesFromApi(location, settings, lang);
+    if (apiSchedule) {
+      // Trigger monthly schedule in background so calendar view has full month
+      fetchOrComputeMonthSchedule(year, month, location, settings, lang).catch(() => {});
+      return apiSchedule;
+    }
+  }
 
+  // 2. Try month schedule
+  const monthSchedules = await fetchOrComputeMonthSchedule(year, month, location, settings, lang);
+  const todaySchedule = monthSchedules.find((s) => s.dateString === dateStr && s.locationId === location.id);
   if (todaySchedule) return todaySchedule;
 
-  // Fallback single-day calculation
-  const timezoneOffset = -now.getTimezoneOffset() / 60;
+  // 3. Fallback: local astronomical calculation using accurate location timezone
+  const tzOffset = getTimezoneOffsetHours(location.timezone);
   const timings = calculateLocalPrayerTimes(
-    now,
+    nowInLoc,
     location.latitude,
     location.longitude,
-    timezoneOffset,
+    tzOffset,
     settings.methodId,
     settings.asrSchool,
     settings.highLatitudeRule
   );
-  const hijri = gregorianToHijri(now, settings.hijriOffsetDays, lang);
+  const hijri = gregorianToHijri(nowInLoc, settings.hijriOffsetDays, lang);
 
-  return {
+  const fallbackSchedule: DailyPrayerTimes = {
+    compositeId: `${location.id}_${dateStr}`,
     dateString: dateStr,
     gregorianDate: {
       day,
       month,
       year,
-      monthName: now.toLocaleString('default', { month: 'long' }),
-      dayName: now.toLocaleString('default', { weekday: 'long' }),
+      monthName: nowInLoc.toLocaleString('default', { month: 'long' }),
+      dayName: nowInLoc.toLocaleString('default', { weekday: 'long' }),
     },
     hijriDate: hijri,
     timings,
@@ -219,6 +332,9 @@ export async function getTodayPrayerTimes(
     calculationSource: 'local_astronomical',
     fetchedAt: Date.now(),
   };
+
+  await savePrayerSchedule(fallbackSchedule);
+  return fallbackSchedule;
 }
 
 export function computeCurrentPrayerStatus(

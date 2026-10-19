@@ -55,12 +55,12 @@ export const SettingsView: React.FC = () => {
     const city = PRESET_CITIES.find((c) => c.id === cityId);
     if (city) {
       const loc = presetCityToLocationProfile(city);
-      setActiveLocation(loc);
       // Auto-set recommended calculation method for that city
       updatePrayerSettings({
         methodId: city.recommendedMethodId,
         methodName: CALCULATION_METHODS[city.recommendedMethodId]?.name || 'Standard',
       });
+      setActiveLocation(loc);
     }
   };
 
@@ -74,25 +74,41 @@ export const SettingsView: React.FC = () => {
     setGpsError(null);
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
-        setActiveLocation({
-          id: `gps_${latitude.toFixed(2)}_${longitude.toFixed(2)}`,
+        let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+        try {
+          const res = await fetch(`https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=1`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.data?.meta?.timezone) {
+              timezone = data.data.meta.timezone;
+            }
+          }
+        } catch (e) {
+          console.info('AlAdhan GPS timezone fallback to device timezone', e);
+        }
+
+        const newLoc = {
+          id: `gps_${latitude.toFixed(4)}_${longitude.toFixed(4)}`,
           name: 'Current GPS Location',
           country: 'Detected',
           latitude,
           longitude,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          timezone,
           isAutomatic: true,
           lastUpdated: Date.now(),
-        });
+        };
+
+        setActiveLocation(newLoc);
         setGpsLoading(false);
       },
       (err) => {
         setGpsLoading(false);
         setGpsError(err.message || 'Unable to retrieve location permission.');
       },
-      { timeout: 10000 }
+      { timeout: 10000, enableHighAccuracy: true }
     );
   };
 

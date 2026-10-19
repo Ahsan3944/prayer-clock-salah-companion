@@ -8,7 +8,7 @@ import {
   SupportedLanguage,
 } from '../types';
 import { PRESET_CITIES, presetCityToLocationProfile } from '../services/preset-cities';
-import { computeCurrentPrayerStatus, getTodayPrayerTimes } from '../services/prayer-service';
+import { computeCurrentPrayerStatus, getNowInTimezone, getTodayPrayerTimes } from '../services/prayer-service';
 import { clearCache, getBookmarks, purgeAllData, toggleBookmark } from '../services/storage';
 import { TRANSLATIONS, Translations } from '../localization';
 
@@ -94,7 +94,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   const [activeTasbihItem, setActiveTasbihItem] = useState<DuaAmalRecord | null>(null);
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [currentTime, setCurrentTime] = useState<Date>(() => getNowInTimezone(activeLocation.timezone));
 
   const isRTL = language === 'ar' || language === 'ur';
   const t = TRANSLATIONS[language] || TRANSLATIONS.en;
@@ -119,19 +119,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Clock tick every second (local memory tick)
+  // Clock tick every second (synchronized to active location timezone)
   useEffect(() => {
-    const timer = setInterval(() => {
-      const now = new Date();
+    const tick = () => {
+      const now = getNowInTimezone(activeLocation.timezone);
       setCurrentTime(now);
       if (todayPrayerTimes) {
         const status = computeCurrentPrayerStatus(todayPrayerTimes, now);
         setCurrentPrayerStatus(status);
       }
-    }, 1000);
+    };
 
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [todayPrayerTimes]);
+  }, [todayPrayerTimes, activeLocation.timezone]);
 
   // Load Bookmarks on mount
   useEffect(() => {
@@ -139,11 +141,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Load or compute Today's prayer times whenever location or settings change
-  const loadSchedule = async () => {
+  const loadSchedule = async (targetLoc = activeLocation, targetSettings = prayerSettings, force = false) => {
     try {
-      const schedule = await getTodayPrayerTimes(activeLocation, prayerSettings, language);
+      const schedule = await getTodayPrayerTimes(targetLoc, targetSettings, language, force);
       setTodayPrayerTimes(schedule);
-      const status = computeCurrentPrayerStatus(schedule, new Date());
+      const nowInLoc = getNowInTimezone(targetLoc.timezone);
+      const status = computeCurrentPrayerStatus(schedule, nowInLoc);
       setCurrentPrayerStatus(status);
     } catch (e) {
       console.warn('Failed to compute today prayer schedule', e);
@@ -151,7 +154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    loadSchedule();
+    loadSchedule(activeLocation, prayerSettings, false);
   }, [activeLocation, prayerSettings, language]);
 
   const setLanguage = (newLang: SupportedLanguage) => {
@@ -166,6 +169,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') {
       localStorage.setItem('salah_location', JSON.stringify(loc));
     }
+    loadSchedule(loc, prayerSettings, true);
   };
 
   const updatePrayerSettings = (newSettings: Partial<PrayerCalculationSettings>) => {
@@ -194,12 +198,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshSchedule = async () => {
     await clearCache();
-    await loadSchedule();
+    await loadSchedule(activeLocation, prayerSettings, true);
   };
 
   const handleClearCache = async () => {
     await clearCache();
-    await loadSchedule();
+    await loadSchedule(activeLocation, prayerSettings, true);
   };
 
   const handlePurgeAllData = async () => {

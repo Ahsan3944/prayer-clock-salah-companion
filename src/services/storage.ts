@@ -1,7 +1,7 @@
 import { BukhariHadithItem, DailyPrayerTimes, LocationProfile, SyncMetadata, TasbihSession } from '../types';
 
 const DB_NAME = 'salah_companion_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -19,8 +19,14 @@ function getDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
 
+      if (event.oldVersion < 3 && db.objectStoreNames.contains('schedules')) {
+        db.deleteObjectStore('schedules');
+      }
+
       if (!db.objectStoreNames.contains('schedules')) {
-        db.createObjectStore('schedules', { keyPath: 'dateString' });
+        const scheduleStore = db.createObjectStore('schedules', { keyPath: 'compositeId' });
+        scheduleStore.createIndex('locationId', 'locationId', { unique: false });
+        scheduleStore.createIndex('dateString', 'dateString', { unique: false });
       }
       if (!db.objectStoreNames.contains('locations')) {
         db.createObjectStore('locations', { keyPath: 'id' });
@@ -61,7 +67,8 @@ export async function savePrayerSchedule(schedule: DailyPrayerTimes): Promise<vo
     return new Promise((resolve, reject) => {
       const tx = db.transaction('schedules', 'readwrite');
       const store = tx.objectStore('schedules');
-      const req = store.put(schedule);
+      const compositeId = `${schedule.locationId}_${schedule.dateString}`;
+      const req = store.put({ ...schedule, compositeId });
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
@@ -77,7 +84,8 @@ export async function savePrayerSchedulesBatch(schedules: DailyPrayerTimes[]): P
       const tx = db.transaction('schedules', 'readwrite');
       const store = tx.objectStore('schedules');
       for (const s of schedules) {
-        store.put(s);
+        const compositeId = `${s.locationId}_${s.dateString}`;
+        store.put({ ...s, compositeId });
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -87,13 +95,13 @@ export async function savePrayerSchedulesBatch(schedules: DailyPrayerTimes[]): P
   }
 }
 
-export async function getPrayerSchedule(dateString: string): Promise<DailyPrayerTimes | null> {
+export async function getPrayerSchedule(locationId: string, dateString: string): Promise<DailyPrayerTimes | null> {
   try {
     const db = await getDB();
     return new Promise((resolve) => {
       const tx = db.transaction('schedules', 'readonly');
       const store = tx.objectStore('schedules');
-      const req = store.get(dateString);
+      const req = store.get(`${locationId}_${dateString}`);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
     });
@@ -102,7 +110,7 @@ export async function getPrayerSchedule(dateString: string): Promise<DailyPrayer
   }
 }
 
-export async function getMonthlySchedules(year: number, month: number): Promise<DailyPrayerTimes[]> {
+export async function getMonthlySchedules(locationId: string, year: number, month: number): Promise<DailyPrayerTimes[]> {
   try {
     const db = await getDB();
     return new Promise((resolve) => {
@@ -110,9 +118,9 @@ export async function getMonthlySchedules(year: number, month: number): Promise<
       const store = tx.objectStore('schedules');
       const req = store.getAll();
       req.onsuccess = () => {
-        const all: DailyPrayerTimes[] = req.result || [];
+        const all: (DailyPrayerTimes & { compositeId?: string })[] = req.result || [];
         const prefix = `${year}-${month.toString().padStart(2, '0')}`;
-        const filtered = all.filter((s) => s.dateString.startsWith(prefix));
+        const filtered = all.filter((s) => s.locationId === locationId && s.dateString.startsWith(prefix));
         filtered.sort((a, b) => a.dateString.localeCompare(b.dateString));
         resolve(filtered);
       };

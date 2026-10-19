@@ -44,6 +44,7 @@ export interface PrayerTimesRecord {
 }
 
 export interface DailyPrayerTimes {
+  compositeId?: string; // ${locationId}_${dateString}
   dateString: string; // YYYY-MM-DD
   gregorianDate: {
     day: number;
