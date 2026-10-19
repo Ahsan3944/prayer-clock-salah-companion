@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Prayer Clock & Salah Companion",
+  "short_name": "PrayerClock",
+  "description": "Accurate, verified, multilingual Islamic prayer times, Gregorian-Hijri calendar, authentic Hadith and Dua collections, and Tasbih counter.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#064e3b",
+  "background_color": "#022c22",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+}
+
+.font-amiri {
+  font-family: 'Amiri', serif;
+}
+
+/* Ensure smooth RTL reading order */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] input {
+  text-align: right;
+}
+
+[dir="rtl"] select {
+  text-align: right;
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Prayer Clock & Salah Companion",
+  "description": "A reliable, multilingual Islamic prayer-time and daily worship companion featuring a live digital clock, prayer timetables, verified Hadith and Dua collections, and an offline-resilient Tasbih counter.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
